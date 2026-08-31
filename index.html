@@ -1023,3 +1023,768 @@
                         '分值': score,
                         '金额': amount,
                         '本人确认': confirm,
+                    });
+                }
+            });
+
+            if (newRows.length === 0) {
+                showToast('未解析到有效数据（需有名字）', 'error');
+                return false;
+            }
+
+            // 追加
+            state.rawData = state.rawData.concat(newRows);
+            const now = new Date();
+            const pad = n => String(n).padStart(2, '0');
+            state.uploadTime = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+            fileNameEl.textContent = state.uploadTime;
+
+            extractYearMonths(state.rawData);
+            setDefaultFilter();
+            applyFilters();
+            showToast(`✅ 追加 ${newRows.length} 条记录，总计 ${state.rawData.length} 条`, 'success');
+            return true;
+        }
+
+        function extractYearMonths(data) {
+            const set = new Set();
+            data.forEach(row => {
+                const d = parseDateValue(row['日期']);
+                if (d) {
+                    const y = d.getFullYear();
+                    const m = d.getMonth() + 1;
+                    set.add(`${y}-${String(m).padStart(2, '0')}`);
+                }
+            });
+            const keys = Array.from(set).sort();
+            const years = new Set();
+            const months = new Set();
+            keys.forEach(k => {
+                const [y, m] = k.split('-').map(Number);
+                years.add(y);
+                months.add(m);
+            });
+            state.allYears = Array.from(years).sort((a, b) => b - a);
+            state.allMonths = Array.from(months).sort((a, b) => a - b);
+        }
+
+        function setDefaultFilter() {
+            if (state.allYears.length > 0) {
+                state.currentYear = state.allYears[0];
+            } else {
+                state.currentYear = '';
+            }
+            const now = new Date();
+            const nowMonth = now.getMonth() + 1;
+            if (state.allMonths.includes(nowMonth)) {
+                state.currentMonth = nowMonth;
+            } else if (state.allMonths.length > 0) {
+                state.currentMonth = state.allMonths[state.allMonths.length - 1];
+            } else {
+                state.currentMonth = '';
+            }
+            if (state.currentYear && state.currentMonth) {
+                const has = state.rawData.some(row => {
+                    const d = parseDateValue(row['日期']);
+                    if (!d) return false;
+                    return d.getFullYear() === state.currentYear && (d.getMonth() + 1) === state.currentMonth;
+                });
+                if (!has) {
+                    const latest = getLatestMonth();
+                    if (latest) {
+                        state.currentYear = latest.year;
+                        state.currentMonth = latest.month;
+                    }
+                }
+            }
+            populateSelects();
+        }
+
+        function getLatestMonth() {
+            const map = new Map();
+            state.rawData.forEach(row => {
+                const d = parseDateValue(row['日期']);
+                if (!d) return;
+                const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+                const dateNum = d.getTime();
+                if (!map.has(key) || dateNum > map.get(key).time) {
+                    map.set(key, { year: d.getFullYear(), month: d.getMonth() + 1, time: dateNum });
+                }
+            });
+            let latest = null;
+            let latestTime = 0;
+            for (const [key, val] of map) {
+                if (val.time > latestTime) {
+                    latestTime = val.time;
+                    latest = val;
+                }
+            }
+            return latest;
+        }
+
+        function populateSelects() {
+            // 年
+            yearSelect.innerHTML = '<option value="">全部</option>';
+            state.allYears.forEach(y => {
+                const opt = document.createElement('option');
+                opt.value = y;
+                opt.textContent = y + '年';
+                if (y === state.currentYear) opt.selected = true;
+                yearSelect.appendChild(opt);
+            });
+
+            // 月 - 根据年份是否全部决定
+            updateMonthSelect();
+        }
+
+        function updateMonthSelect() {
+            const yearVal = yearSelect.value;
+            const isAll = yearVal === '';
+            // 清空月
+            monthSelect.innerHTML = '<option value="">全部</option>';
+            if (isAll) {
+                // 全部年份，只显示"全部"（即禁用月份筛选）
+                monthSelect.disabled = true;
+                monthSelect.value = '';
+                // 触发筛选（清空月）
+                applyFilters();
+                return;
+            } else {
+                monthSelect.disabled = false;
+                const year = parseInt(yearVal);
+                // 获取该年份下所有月份
+                const monthsSet = new Set();
+                state.rawData.forEach(row => {
+                    const d = parseDateValue(row['日期']);
+                    if (d && d.getFullYear() === year) {
+                        const group = calcMonthGroup(d, state.startDay);
+                        if (group && group.year === year) {
+                            monthsSet.add(group.month);
+                        }
+                    }
+                });
+                const months = Array.from(monthsSet).sort((a, b) => a - b);
+                months.forEach(m => {
+                    const opt = document.createElement('option');
+                    opt.value = m;
+                    opt.textContent = m + '月';
+                    if (m === state.currentMonth) opt.selected = true;
+                    monthSelect.appendChild(opt);
+                });
+                // 如果没有月份数据，则添加全部
+                if (months.length === 0) {
+                    monthSelect.innerHTML = '<option value="">全部</option>';
+                }
+                // 触发筛选（更新月份）
+                applyFilters();
+            }
+        }
+
+        // 年份变化时更新月份
+        yearSelect.addEventListener('change', function() {
+            updateMonthSelect();
+        });
+
+        // 月份变化时触发筛选
+        monthSelect.addEventListener('change', function() {
+            applyFilters();
+        });
+
+        // ================================================================
+        //  筛选（固定起始日26）
+        // ================================================================
+        function applyFilters() {
+            const year = parseInt(yearSelect.value) || null;
+            const month = parseInt(monthSelect.value) || null;
+            const startDay = 26;
+
+            state.startDay = startDay;
+            state.currentYear = year;
+            state.currentMonth = month;
+
+            let filtered = state.rawData;
+
+            if (year !== null && month !== null) {
+                filtered = filtered.filter(row => {
+                    const d = parseDateValue(row['日期']);
+                    if (!d) return false;
+                    const group = calcMonthGroup(d, startDay);
+                    if (!group) return false;
+                    return group.year === year && group.month === month;
+                });
+            } else if (year !== null) {
+                filtered = filtered.filter(row => {
+                    const d = parseDateValue(row['日期']);
+                    if (!d) return false;
+                    const group = calcMonthGroup(d, startDay);
+                    return group ? group.year === year : false;
+                });
+            } else {
+                // year为null，只按月份？这里要求年份全部时月份也只能全部，所以month应为空
+                // 不进行月份筛选
+            }
+
+            state.filteredData = filtered;
+            renderAll();
+            saveToCache();
+        }
+
+        // ================================================================
+        //  渲染
+        // ================================================================
+        function renderAll() {
+            const data = state.filteredData;
+
+            let totalNeg = 0,
+                totalPos = 0;
+            data.forEach(r => {
+                const s = parseFloat(r['分值']) || 0;
+                if (s < 0) totalNeg += s;
+                else if (s > 0) totalPos += s;
+            });
+            totalScore.textContent = totalNeg.toFixed(0);
+            totalBonus.textContent = totalPos.toFixed(0);
+
+            const totalAmountVal = data.reduce((sum, r) => sum + (parseFloat(r['金额']) || 0), 0);
+            totalAmount.textContent = totalAmountVal.toFixed(0);
+
+            const names = new Set(data.map(r => r['名字']).filter(Boolean));
+            personCount.textContent = names.size;
+
+            const unconfirmedRecords = getUnconfirmedRecords(data);
+            if (unconfirmedRecords.length > 0) {
+                const nameMap = new Map();
+                unconfirmedRecords.forEach(rec => {
+                    if (!nameMap.has(rec.name)) {
+                        nameMap.set(rec.name, new Set());
+                    }
+                    if (rec.year !== null && rec.month !== null) {
+                        nameMap.get(rec.name).add(getMonthLabel(rec.year, rec.month));
+                    } else {
+                        nameMap.get(rec.name).add('未知月份');
+                    }
+                });
+                let html = '';
+                for (const [name, monthSet] of nameMap) {
+                    const months = Array.from(monthSet).sort();
+                    const monthStr = months.map(m => `<span class="month-badge">${m}</span>`).join('');
+                    html += `<span class="name-tag">${name} ${monthStr}</span>`;
+                }
+                unconfirmNames.innerHTML = html;
+                unconfirmNames.className = 'names';
+            } else {
+                unconfirmNames.innerHTML = '✅ 全部已确认';
+                unconfirmNames.className = 'empty';
+            }
+
+            renderTable(data);
+            renderBarChart(data);
+            renderTrendChart(state.rawData);
+
+            const year = yearSelect.value;
+            const month = monthSelect.value;
+            let sub = '';
+            if (year && month) sub = `${year}年 ${month}月`;
+            else if (year) sub = `${year}年`;
+            else if (month) sub = `${month}月`;
+            else sub = '全部';
+            totalSub.innerHTML = `${sub} · 不统计加分 <span class="highlight" id="totalBonus">${totalPos.toFixed(0)}</span>`;
+            amountSub.textContent = sub;
+            personSub.textContent = sub;
+            rowCount.textContent = `${data.length} 条`;
+        }
+
+        // ---- 明细表（日期降序） ----
+        function renderTable(data) {
+            if (!data || data.length === 0) {
+                tableBody.innerHTML = '<tr class="empty-row"><td colspan="6">暂无匹配数据</td></tr>';
+                return;
+            }
+            // 按日期降序排列（最新在前）
+            const sorted = [...data].sort((a, b) => {
+                const da = parseDateValue(a['日期']);
+                const db = parseDateValue(b['日期']);
+                if (!da && !db) return 0;
+                if (!da) return 1;
+                if (!db) return -1;
+                return db.getTime() - da.getTime();
+            });
+
+            let html = '';
+            sorted.forEach(row => {
+                const dateStr = formatDateShort(row['日期']);
+                const confirm = (row['本人确认'] || '').toString().trim().toUpperCase();
+                const confirmed = confirm === 'Y';
+                html += `<tr>
+                    <td>${dateStr}</td>
+                    <td><strong>${row['名字']}</strong></td>
+                    <td>${row['扣分项目']}</td>
+                    <td>${row['分值']}</td>
+                    <td>${row['金额']}</td>
+                    <td><span class="badge-confirm ${confirmed ? 'yes' : 'no'}">${confirmed ? '✅ 已确认' : '❌ 未确认'}</span></td>
+                </tr>`;
+            });
+            tableBody.innerHTML = html;
+        }
+
+        // ---- 柱形图（X轴标签隐藏） ----
+        function renderBarChart(data) {
+            if (!state.barChartInstance) {
+                state.barChartInstance = echarts.init(barChartEl);
+                window.addEventListener('resize', () => {
+                    state.barChartInstance && state.barChartInstance.resize();
+                });
+            }
+
+            const aggregated = aggregatePerson(data);
+            aggregated.sort((a, b) => a.name.localeCompare(b.name));
+
+            const names = aggregated.map(d => d.name);
+            const positive = aggregated.map(d => d.positive);
+            const negative = aggregated.map(d => d.negative);
+
+            const option = {
+                tooltip: {
+                    trigger: 'axis',
+                    axisPointer: { type: 'shadow' },
+                    formatter: function(params) {
+                        let res = `<strong>${params[0].axisValue}</strong><br/>`;
+                        params.forEach(p => {
+                            if (p.seriesName === '加分') {
+                                res += `${p.seriesName}: +${p.value}<br/>`;
+                            } else if (p.seriesName === '扣分') {
+                                res += `${p.seriesName}: ${p.value}<br/>`;
+                            }
+                        });
+                        const person = aggregated.find(d => d.name === params[0].axisValue);
+                        if (person) res += `总金额: ${person.amount}`;
+                        return res;
+                    }
+                },
+                legend: {
+                    data: ['加分', '扣分'],
+                    top: 0,
+                    right: 10,
+                    textStyle: { fontSize: 13 },
+                },
+                grid: {
+                    left: 20,
+                    right: 20,
+                    top: 40,
+                    bottom: 30,
+                    containLabel: true,
+                },
+                xAxis: {
+                    type: 'category',
+                    data: names,
+                    axisLabel: { show: false },
+                    axisLine: { show: true },
+                    axisTick: { show: false },
+                },
+                yAxis: {
+                    type: 'value',
+                    name: '',
+                    nameTextStyle: { show: false },
+                    axisLabel: { fontSize: 11 },
+                    splitLine: { lineStyle: { color: '#eee', type: 'dashed' } },
+                },
+                series: [{
+                    name: '加分',
+                    type: 'bar',
+                    stack: 'total',
+                    data: positive,
+                    itemStyle: {
+                        color: '#d93025',
+                        borderRadius: [4, 4, 0, 0],
+                    },
+                    label: {
+                        show: true,
+                        position: 'top',
+                        formatter: (p) => {
+                            if (p.value === 0) return '';
+                            const name = names[p.dataIndex];
+                            return `${name}\n+${p.value}`;
+                        },
+                        fontSize: 11,
+                        fontWeight: 'bold',
+                        color: '#d93025',
+                        lineHeight: 16,
+                    },
+                    barWidth: '40%',
+                }, {
+                    name: '扣分',
+                    type: 'bar',
+                    stack: 'total',
+                    data: negative,
+                    itemStyle: {
+                        color: '#34a853',
+                        borderRadius: [0, 0, 4, 4],
+                    },
+                    label: {
+                        show: true,
+                        position: 'bottom',
+                        formatter: (p) => {
+                            if (p.value === 0) return '';
+                            const name = names[p.dataIndex];
+                            return `${name}\n${p.value}`;
+                        },
+                        fontSize: 11,
+                        fontWeight: 'bold',
+                        color: '#34a853',
+                        lineHeight: 16,
+                    },
+                    barWidth: '40%',
+                }],
+                animationDelay: (idx) => idx * 50,
+                animationEasing: 'elasticOut',
+            };
+
+            state.barChartInstance.setOption(option, true);
+            state.barChartInstance.resize();
+        }
+
+        // ---- 趋势图（单左轴，范围自适应） ----
+        function renderTrendChart(allData) {
+            if (!state.trendChartInstance) {
+                state.trendChartInstance = echarts.init(trendChartEl);
+                window.addEventListener('resize', () => {
+                    state.trendChartInstance && state.trendChartInstance.resize();
+                });
+            }
+
+            const monthly = aggregateByMonthSplit(allData, state.startDay);
+            monthly.sort((a, b) => a.key.localeCompare(b.key));
+
+            const xData = monthly.map(d => getMonthLabel(d.year, d.month));
+            const negData = monthly.map(d => d.negative);
+            const posData = monthly.map(d => d.positive);
+
+            // 计算轴范围
+            const allVals = [...negData, ...posData];
+            const maxAbs = allVals.reduce((max, v) => Math.max(max, Math.abs(v)), 0);
+            const axisMax = maxAbs * 1.2 || 1;
+            const axisMin = -axisMax;
+
+            // 标记点大小
+            const minSize = 6,
+                maxSize = 20;
+            const totalMax = allVals.reduce((max, v) => Math.max(max, Math.abs(v)), 1);
+            const negSizes = negData.map(v => v === 0 ? 0 : minSize + (Math.abs(v) / totalMax) * (maxSize - minSize));
+            const posSizes = posData.map(v => v === 0 ? 0 : minSize + (v / totalMax) * (maxSize - minSize));
+
+            const option = {
+                tooltip: {
+                    trigger: 'axis',
+                    formatter: (params) => {
+                        let res = `<strong>${params[0].axisValue}</strong><br/>`;
+                        params.forEach(p => {
+                            if (p.seriesName === '扣分') {
+                                res += `${p.seriesName}: ${p.value}<br/>`;
+                            } else if (p.seriesName === '加分') {
+                                res += `${p.seriesName}: +${p.value}<br/>`;
+                            }
+                        });
+                        const d = monthly.find(m => getMonthLabel(m.year, m.month) === params[0].axisValue);
+                        if (d) res += `总金额: ${d.amount}`;
+                        return res;
+                    }
+                },
+                legend: {
+                    data: ['扣分', '加分'],
+                    top: 0,
+                    right: 10,
+                    textStyle: { fontSize: 13 },
+                },
+                grid: {
+                    left: 20,
+                    right: 20,
+                    top: 40,
+                    bottom: 30,
+                    containLabel: true,
+                },
+                xAxis: {
+                    type: 'category',
+                    data: xData,
+                    axisLabel: { show: false },
+                    axisLine: { show: true },
+                    axisTick: { show: false },
+                },
+                yAxis: {
+                    type: 'value',
+                    min: axisMin,
+                    max: axisMax,
+                    name: '',
+                    nameTextStyle: { show: false },
+                    axisLabel: { fontSize: 11 },
+                    splitLine: { lineStyle: { color: '#eee', type: 'dashed' } },
+                },
+                series: [{
+                    name: '扣分',
+                    type: 'line',
+                    data: negData,
+                    smooth: true,
+                    symbol: 'circle',
+                    symbolSize: (val, params) => negSizes[params.dataIndex] || 0,
+                    lineStyle: {
+                        color: '#1a73e8',
+                        width: 2.5,
+                    },
+                    itemStyle: {
+                        color: '#1a73e8',
+                        borderColor: '#fff',
+                        borderWidth: 1.5,
+                    },
+                    label: {
+                        show: true,
+                        formatter: (params) => {
+                            const d = monthly[params.dataIndex];
+                            if (!d || d.negative === 0) return '';
+                            return `${getMonthLabel(d.year, d.month)}\n${d.negative}`;
+                        },
+                        fontSize: 11,
+                        fontWeight: 'bold',
+                        color: '#1a73e8',
+                        textShadowBlur: 2,
+                        textShadowColor: 'rgba(255,255,255,0.8)',
+                        position: 'bottom',
+                        lineHeight: 16,
+                    },
+                }, {
+                    name: '加分',
+                    type: 'line',
+                    data: posData,
+                    smooth: true,
+                    symbol: 'circle',
+                    symbolSize: (val, params) => posSizes[params.dataIndex] || 0,
+                    lineStyle: {
+                        color: '#f9ab00',
+                        width: 2.5,
+                    },
+                    itemStyle: {
+                        color: '#f9ab00',
+                        borderColor: '#fff',
+                        borderWidth: 1.5,
+                    },
+                    label: {
+                        show: true,
+                        formatter: (params) => {
+                            const d = monthly[params.dataIndex];
+                            if (!d || d.positive === 0) return '';
+                            return `${getMonthLabel(d.year, d.month)}\n+${d.positive}`;
+                        },
+                        fontSize: 11,
+                        fontWeight: 'bold',
+                        color: '#f9ab00',
+                        textShadowBlur: 2,
+                        textShadowColor: 'rgba(255,255,255,0.8)',
+                        position: 'top',
+                        lineHeight: 16,
+                    },
+                }],
+                animationDelay: (idx) => idx * 80,
+                animationEasing: 'cubicOut',
+            };
+
+            state.trendChartInstance.setOption(option, true);
+            state.trendChartInstance.resize();
+        }
+
+        // ================================================================
+        //  导出、复制、重置（需要密码）
+        // ================================================================
+        function exportCSV() {
+            const data = state.filteredData;
+            if (!data || data.length === 0) {
+                showToast('没有数据可导出', 'error');
+                return;
+            }
+            const headers = ['日期', '名字', '扣分项目', '分值', '金额', '本人确认'];
+            const rows = data.map(r => [
+                formatDateShort(r['日期']),
+                r['名字'],
+                r['扣分项目'],
+                r['分值'],
+                r['金额'],
+                r['本人确认'] || '',
+            ]);
+            let csv = '\uFEFF' + headers.join(',') + '\n';
+            rows.forEach(row => {
+                csv += row.map(cell => {
+                    if (typeof cell === 'string' && (cell.includes(',') || cell.includes('"') || cell.includes(
+                            '\n'))) {
+                        return `"${cell.replace(/"/g, '""')}"`;
+                    }
+                    return cell;
+                }).join(',') + '\n';
+            });
+
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            const fileName = `奖惩数据_${new Date().toISOString().slice(0,10)}.csv`;
+            link.download = fileName;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(link.href);
+            showToast(`✅ 导出 ${data.length} 条数据`, 'success');
+        }
+
+        function copyTable() {
+            const data = state.filteredData;
+            if (!data || data.length === 0) {
+                showToast('没有数据可复制', 'error');
+                return;
+            }
+            let text = '日期\t名字\t扣分项目\t分值\t金额\t本人确认\n';
+            data.forEach(r => {
+                const dateStr = formatDateShort(r['日期']);
+                const confirm = (r['本人确认'] || '').toString().trim().toUpperCase() === 'Y' ? '已确认' : '未确认';
+                text += `${dateStr}\t${r['名字']}\t${r['扣分项目']}\t${r['分值']}\t${r['金额']}\t${confirm}\n`;
+            });
+            navigator.clipboard.writeText(text).then(() => {
+                showToast(`✅ 已复制 ${data.length} 条数据`, 'success');
+            }).catch(() => {
+                const ta = document.createElement('textarea');
+                ta.value = text;
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand('copy');
+                document.body.removeChild(ta);
+                showToast(`✅ 已复制 ${data.length} 条数据`, 'success');
+            });
+        }
+
+        function resetAll() {
+            if (state.rawData.length === 0) {
+                showToast('已经是空状态', 'info');
+                return;
+            }
+            if (!confirm('确定要清空所有数据吗？')) return;
+            state.rawData = [];
+            state.filteredData = [];
+            state.allYears = [];
+            state.allMonths = [];
+            state.currentYear = '';
+            state.currentMonth = '';
+            state.startDay = 26;
+            state.uploadTime = null;
+            fileNameEl.textContent = '未上传';
+            localStorage.removeItem('dash_data_v2');
+            localStorage.removeItem('dash_startDay_v2');
+            localStorage.removeItem('dash_uploadTime_v2');
+            populateSelects();
+            renderAll();
+            showToast('已清空数据', 'info');
+        }
+
+        // ================================================================
+        //  事件绑定
+        // ================================================================
+        uploadBtn.addEventListener('click', withAuth(function() {
+            fileInput.click();
+        }));
+
+        resetBtn.addEventListener('click', withAuth(resetAll));
+
+        fileInput.addEventListener('change', function(e) {
+            const file = this.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(ev) {
+                try {
+                    const data = new Uint8Array(ev.target.result);
+                    const workbook = XLSX.read(data, { type: 'array', cellDates: true });
+                    const success = loadDataFromExcel(workbook);
+                    if (!success) {
+                        fileInput.value = '';
+                    }
+                } catch (err) {
+                    showToast('解析 Excel 失败: ' + err.message, 'error');
+                    fileInput.value = '';
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        });
+
+        applyBtn.addEventListener('click', applyFilters);
+
+        exportBtn.addEventListener('click', exportCSV);
+        copyTableBtn.addEventListener('click', copyTable);
+
+        let resizeTimer;
+        window.addEventListener('resize', () => {
+            clearTimeout(resizeTimer);
+            resizeTimer = setTimeout(() => {
+                if (state.barChartInstance) state.barChartInstance.resize();
+                if (state.trendChartInstance) state.trendChartInstance.resize();
+            }, 200);
+        });
+
+        // ================================================================
+        //  缓存
+        // ================================================================
+        function saveToCache() {
+            try {
+                if (state.rawData.length > 0) {
+                    localStorage.setItem('dash_data_v2', JSON.stringify(state.rawData));
+                    localStorage.setItem('dash_startDay_v2', String(state.startDay));
+                    if (state.uploadTime) {
+                        localStorage.setItem('dash_uploadTime_v2', state.uploadTime);
+                    }
+                } else {
+                    localStorage.removeItem('dash_data_v2');
+                    localStorage.removeItem('dash_startDay_v2');
+                    localStorage.removeItem('dash_uploadTime_v2');
+                }
+            } catch (e) { /* ignore */ }
+        }
+
+        function loadFromCache() {
+            try {
+                const cached = localStorage.getItem('dash_data_v2');
+                if (cached) {
+                    const parsed = JSON.parse(cached);
+                    if (Array.isArray(parsed) && parsed.length > 0) {
+                        state.rawData = parsed;
+                        state.startDay = parseInt(localStorage.getItem('dash_startDay_v2')) || 26;
+                        state.uploadTime = localStorage.getItem('dash_uploadTime_v2') || null;
+                        fileNameEl.textContent = state.uploadTime || '📂 缓存数据';
+                        extractYearMonths(state.rawData);
+                        setDefaultFilter();
+                        applyFilters();
+                        return true;
+                    }
+                }
+            } catch (e) { /* ignore */ }
+            return false;
+        }
+
+        // ================================================================
+        //  初始化 - 完全空状态，无演示数据
+        // ================================================================
+        // 尝试从缓存加载，若无则保持空状态
+        if (!loadFromCache()) {
+            state.rawData = [];
+            state.filteredData = [];
+            state.allYears = [];
+            state.allMonths = [];
+            state.currentYear = '';
+            state.currentMonth = '';
+            state.startDay = 26;
+            state.uploadTime = null;
+            fileNameEl.textContent = '未上传';
+            populateSelects();
+            renderAll();
+            // 不显示任何提示，静默空状态
+        }
+
+        console.log('🏅 奖惩数据公示仪表盘 v2.0 已启动（空状态）');
+        console.log('💡 支持列名: 日期, 名字, 扣分项目/扣分项, 分值, 金额, 本人确认');
+        console.log('📌 分值保留正负，扣分总数仅统计负分，加分单独显示（不统计）');
+        console.log('📂 数据自动缓存于浏览器本地');
+        console.log('🔒 上传和重置需要密码: 123456');
+        console.log('📅 起始日固定为26日，年份选“全部”时月份自动禁用');
+    </script>
+</body>
+</html>
