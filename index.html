@@ -798,12 +798,12 @@
       return;
     }
 
-    const months = getMonthsOfYear(state.year);
+    const months = getMonthsOfYear(state.year);   // 已按降序排列，months[0] 即最新月份
     elMonth.disabled = false;
 
-    // 默认“全部月份”；若选中的月份在该年无数据也回到“全部月份”
-    if (state.month !== null && months.indexOf(state.month) < 0) {
-      state.month = null;
+    // 默认选中该统计年有数据的最新月份；若选中的月份在该年无数据也回到最新月份
+    if (state.month === null || months.indexOf(state.month) < 0) {
+      state.month = months.length ? months[0] : null;
     }
 
     let html = '<option value="">全部月份</option>';
