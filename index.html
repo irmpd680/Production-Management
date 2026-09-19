@@ -81,6 +81,7 @@
   .table-wrap{overflow:auto;max-height:58vh;border-radius:12px;
               border:1px solid rgba(255,255,255,.08);-webkit-overflow-scrolling:touch;}
   table{width:100%;min-width:680px;border-collapse:separate;border-spacing:0;font-size:13px;}
+  /* 仅冻结首行表头 */
   thead th{position:sticky;top:0;z-index:5;background:#16223a;color:#93a5c0;
            font-weight:600;font-size:12.5px;padding:10px 12px;text-align:left;
            white-space:nowrap;border-bottom:1px solid rgba(255,255,255,.12);}
@@ -89,13 +90,8 @@
   tbody tr:nth-child(even) td{background:#0d1626;}
   tbody tr:last-child td{border-bottom:none;}
 
-  th.col-date,td.col-date{position:sticky;left:0;z-index:4;width:110px;min-width:110px;}
-  th.col-name,td.col-name{position:sticky;left:110px;z-index:4;width:80px;min-width:80px;}
-  thead th.col-date,thead th.col-name{z-index:7;}
-  td.col-date,td.col-name{background:#131f36;}
-  tbody tr:nth-child(even) td.col-date,
-  tbody tr:nth-child(even) td.col-name{background:#101a2e;}
-  th.col-name,td.col-name{border-right:1px solid rgba(255,255,255,.12);}
+  th.col-date,td.col-date{width:110px;min-width:110px;}
+  th.col-name,td.col-name{width:90px;min-width:90px;}
 
   .v-neg{color:#4ade80;font-weight:600;font-variant-numeric:tabular-nums;}
   .v-pos{color:#f87171;font-weight:600;font-variant-numeric:tabular-nums;}
@@ -198,8 +194,6 @@
       return q && q.trim() ? q.trim() : 'data.csv';
     } catch (e) { return 'data.csv'; }
   })();
-
-  const OVERLAP = 0.45;
 
   /* ============================================================
    *  工具函数
@@ -318,9 +312,10 @@
   /* ============================================================
    *  气泡构建
    * ============================================================ */
+  /** 加分圆与扣分圆同圆心 → 外接半径取两者较大值 */
   function updateMetrics(b) {
     b.rx = Math.max(b.rp, b.rn);
-    b.ry = (b.rp > 0 && b.rn > 0) ? (b.rp + b.rn + b.d) / 2 : Math.max(b.rp, b.rn);
+    b.ry = b.rx;
   }
 
   function buildPeople(rows) {
@@ -355,12 +350,10 @@
     const list = people.map(p => {
       const rp = rad(p.pos);
       const rn = rad(p.neg);
-      const both = rp > 0 && rn > 0;
-      const d = both ? (rp + rn) * OVERLAP : 0;
       const old = prev.get(p.name);
       const b = {
         name: p.name, neg: p.neg, pos: p.pos,
-        rp: rp, rn: rn, d: d, rx: 0, ry: 0,
+        rp: rp, rn: rn, rx: 0, ry: 0,
         x: old ? old.x : cx + (Math.random() - 0.5) * base * 0.40,
         y: old ? old.y : cy + (Math.random() - 0.5) * base * 0.40,
         vx: 0, vy: 0, dragging: false
@@ -369,12 +362,13 @@
       return b;
     });
 
-    const area = list.reduce((s, b) => s + Math.PI * (b.rp * b.rp + b.rn * b.rn), 0);
+    /* 同圆心后实际占用面积 = 以较大半径为准的圆面积 */
+    const area = list.reduce((s, b) => s + Math.PI * b.rx * b.rx, 0);
     const avail = W * H * 0.55;
     if (area > avail) {
       const k = Math.max(0.5, Math.sqrt(avail / area));
       for (const b of list) {
-        b.rp *= k; b.rn *= k; b.d *= k;
+        b.rp *= k; b.rn *= k;
         updateMetrics(b);
       }
     }
@@ -456,12 +450,8 @@
   /* ============================================================
    *  绘制
    * ============================================================ */
+  /** 加分圆与扣分圆共用同一个圆心 */
   function centers(b) {
-    if (b.rp > 0 && b.rn > 0) {
-      const yPos = b.y - (b.d + b.rn - b.rp) / 2;
-      return { x: b.x, yPos: yPos, yNeg: yPos + b.d };
-    }
-    if (b.rp > 0) return { x: b.x, yPos: b.y, yNeg: b.y };
     return { x: b.x, yPos: b.y, yNeg: b.y };
   }
 
@@ -513,37 +503,34 @@
 
   function drawLabels(b) {
     const c = centers(b);
-    const base = Math.max(b.rp, b.rn, 1);
+    const rMax = Math.max(b.rp, b.rn, 1);
 
     ctx.textBaseline = 'middle';
     ctx.shadowColor = 'rgba(0,0,0,.55)';
     ctx.shadowBlur = 3;
 
-    let nameY;
-    if (b.rp >= base * 0.62) nameY = c.yPos - b.rp * 0.52;
-    else if (b.rn > 0) nameY = c.yNeg - b.rn * 0.58;
-    else nameY = b.y;
-
-    const nameSize = Math.max(9, Math.min(15, base * 0.27));
+    /* 名字：圆心正上方 */
+    const nameSize = Math.max(9, Math.min(15, rMax * 0.27));
     ctx.textAlign = 'center';
     ctx.fillStyle = 'rgba(255,255,255,.98)';
     ctx.font = '600 ' + nameSize.toFixed(1) + 'px ' + FONT;
-    ctx.fillText(b.name, c.x, nameY);
+    ctx.fillText(b.name, c.x, c.y - rMax * 0.45);
 
+    /* 分值：圆心下方左右两侧 */
     const cand = [];
     if (b.rp > 0) cand.push(b.rp);
     if (b.rn > 0) cand.push(b.rn);
-    const numBase = cand.length ? Math.min.apply(null, cand) : base;
+    const numBase = cand.length ? Math.min.apply(null, cand) : rMax;
     const numSize = Math.max(9, Math.min(15, numBase * 0.36));
     ctx.font = '700 ' + numSize.toFixed(1) + 'px ' + FONT;
 
     if (b.rp > 0 && b.pos > 0) {
       ctx.textAlign = 'left';
-      ctx.fillText('+' + b.pos, c.x - b.rp * 0.86, c.yPos);
+      ctx.fillText('+' + b.pos, c.x - b.rp * 0.80, c.y + rMax * 0.34);
     }
     if (b.rn > 0 && b.neg > 0) {
       ctx.textAlign = 'right';
-      ctx.fillText('-' + b.neg, c.x + b.rn * 0.86, c.yNeg);
+      ctx.fillText('-' + b.neg, c.x + b.rn * 0.80, c.y + rMax * 0.34);
     }
 
     ctx.shadowBlur = 0;
@@ -764,6 +751,13 @@
     return Array.from(set).sort((a, b) => b - a);
   }
 
+  /** CSV 中最新日期所属的统计年 */
+  function latestStatYear() {
+    let latest = '';
+    for (const r of state.allRows) { if (r.date > latest) latest = r.date; }
+    return latest ? statOf(latest).y : null;
+  }
+
   /** 某统计年有数据的月份（降序） */
   function getMonthsOfYear(y) {
     const set = new Set();
@@ -787,9 +781,10 @@
 
     elYear.disabled = false;
 
-    // 若当前选中的年份已不在列表，则切换到最新年
+    // 默认选中 CSV 中最新日期所在的年份（失效时退回最新统计年）
     if (state.year === null || years.indexOf(state.year) < 0) {
-      state.year = years[0];
+      const def = latestStatYear();
+      state.year = (def !== null && years.indexOf(def) >= 0) ? def : years[0];
     }
 
     elYear.innerHTML = years.map(function (y) {
@@ -825,7 +820,7 @@
   elYear.addEventListener('change', function () {
     const v = elYear.value;
     state.year = v === '' ? null : +v;
-    // 换年份时清空月份，避免残留无效值
+    // 换年份时清空月份，默认回到“全部月份”
     state.month = null;
     buildMonthOptions();
     render();
@@ -843,7 +838,7 @@
   function loadData(rows) {
     state.allRows = rows;
     state.year = null;
-    state.month = null;
+    state.month = null;   // 默认“全部月份”
 
     buildYearOptions();
     buildMonthOptions();
