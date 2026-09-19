@@ -1,0 +1,898 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0b1220">
+<title>上下料奖惩仪表盘</title>
+<style>
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;padding:0;}
+  body{
+    font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    background:#0b1220;
+    background-image:
+      radial-gradient(900px 460px at 50% -160px, rgba(56,110,220,.30), transparent 70%),
+      radial-gradient(700px 380px at 100% 0%, rgba(34,197,94,.10), transparent 70%);
+    color:#e6edf7;min-height:100vh;-webkit-font-smoothing:antialiased;
+  }
+  .app{max-width:1180px;margin:0 auto;padding:16px 14px 40px;display:flex;flex-direction:column;gap:14px;}
+
+  /* ---------- 头部 ---------- */
+  .hd{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:2px;}
+  .hd h1{font-size:19px;margin:0;font-weight:700;letter-spacing:.5px;color:#e6edf7;
+         display:flex;align-items:center;flex-wrap:wrap;gap:8px;}
+  .src-badge{font-size:11px;font-weight:400;color:#8b9bb4;background:rgba(255,255,255,.06);
+             border:1px solid rgba(255,255,255,.10);border-radius:999px;padding:2px 10px;}
+  .src-badge.err{color:#fbbf24;border-color:rgba(245,158,11,.35);background:rgba(245,158,11,.10);}
+  .btn{font:inherit;font-size:13px;padding:7px 14px;border-radius:10px;cursor:pointer;
+       background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.14);
+       color:#e6edf7;transition:.15s;user-select:none;display:inline-flex;align-items:center;}
+  .btn:hover{background:rgba(255,255,255,.15);}
+
+  /* ---------- 通用面板 ---------- */
+  .panel{background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.085);
+         border-radius:16px;padding:14px;}
+
+  /* ---------- 顶部：周期 + 汇总 ---------- */
+  .topbar{display:grid;grid-template-columns:minmax(240px,1fr) minmax(260px,auto);gap:14px;align-items:end;}
+  @media(max-width:760px){.topbar{grid-template-columns:1fr;align-items:stretch;}}
+  .field{display:flex;flex-direction:column;gap:6px;}
+  .field-label{font-size:12px;color:#8b9bb4;letter-spacing:.4px;}
+  .select{font:inherit;font-size:14px;padding:9px 12px;border-radius:10px;
+          background:#152036;color:#e6edf7;border:1px solid rgba(255,255,255,.14);width:100%;}
+  .select:focus{outline:none;border-color:#3b82f6;}
+  .select:disabled{opacity:.55;cursor:not-allowed;}
+  .stats{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+  .stat{position:relative;border-radius:12px;padding:10px 14px;overflow:hidden;
+        background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.09);}
+  .stat::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;}
+  .stat-neg::before{background:#22c55e;}
+  .stat-pos::before{background:#ef4444;}
+  .stat-label{font-size:12px;color:#8b9bb4;margin-bottom:2px;}
+  .stat-value{font-size:26px;font-weight:700;line-height:1.1;font-variant-numeric:tabular-nums;}
+  .stat-neg .stat-value{color:#4ade80;}
+  .stat-pos .stat-value{color:#f87171;}
+
+  /* ---------- 警示框 ---------- */
+  .alert-panel{border-left:3px solid #f59e0b;padding:12px 14px;}
+  .alert-head{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;
+              color:#fbbf24;margin-bottom:9px;}
+  .alert-count{background:rgba(245,158,11,.18);border-radius:999px;padding:1px 8px;font-size:12px;}
+  .alert-list{display:flex;flex-wrap:wrap;gap:8px;max-height:118px;overflow:auto;}
+  .chip{background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.35);
+        color:#fbbf24;padding:4px 10px;border-radius:999px;font-size:12.5px;white-space:nowrap;}
+  .chip em{font-style:normal;opacity:.72;margin-left:6px;}
+  .alert-none{font-size:12.5px;color:#4ade80;}
+  .alert-none.muted{color:#6b7c96;}
+
+  /* ---------- 气泡图 ---------- */
+  .panel-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:10px;}
+  .panel-head h2{font-size:14px;font-weight:600;margin:0;color:#c7d4e8;letter-spacing:.3px;}
+  .hint{font-size:11.5px;color:#6b7c96;}
+  .canvas-wrap{position:relative;width:100%;height:clamp(320px,56vh,520px);border-radius:14px;
+    background:radial-gradient(circle at 50% 50%, rgba(96,165,250,.07), transparent 62%);}
+  #canvas{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none;}
+
+  /* ---------- 明细表 ---------- */
+  .table-wrap{overflow:auto;max-height:58vh;border-radius:12px;
+              border:1px solid rgba(255,255,255,.08);-webkit-overflow-scrolling:touch;}
+  table{width:100%;min-width:680px;border-collapse:separate;border-spacing:0;font-size:13px;}
+  thead th{position:sticky;top:0;z-index:5;background:#16223a;color:#93a5c0;
+           font-weight:600;font-size:12.5px;padding:10px 12px;text-align:left;
+           white-space:nowrap;border-bottom:1px solid rgba(255,255,255,.12);}
+  tbody td{padding:9px 12px;white-space:nowrap;background:#101a2e;
+           border-bottom:1px solid rgba(255,255,255,.055);}
+  tbody tr:nth-child(even) td{background:#0d1626;}
+  tbody tr:last-child td{border-bottom:none;}
+
+  /* 冻结列 */
+  th.col-date,td.col-date{position:sticky;left:0;z-index:4;width:110px;min-width:110px;}
+  th.col-name,td.col-name{position:sticky;left:110px;z-index:4;width:80px;min-width:80px;}
+  thead th.col-date,thead th.col-name{z-index:7;}
+  td.col-date,td.col-name{background:#131f36;}
+  tbody tr:nth-child(even) td.col-date,
+  tbody tr:nth-child(even) td.col-name{background:#101a2e;}
+  th.col-name,td.col-name{border-right:1px solid rgba(255,255,255,.12);}
+
+  .v-neg{color:#4ade80;font-weight:600;font-variant-numeric:tabular-nums;}
+  .v-pos{color:#f87171;font-weight:600;font-variant-numeric:tabular-nums;}
+  .v-no{color:#fbbf24;}
+  .empty-cell{text-align:center;color:#6b7c96;padding:22px;}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <header class="hd">
+    <h1>上下料奖惩仪表盘 <span class="src-badge" id="srcBadge">加载中…</span></h1>
+    <div class="hd-actions">
+      <button class="btn" id="exportBtn" type="button">导出 CSV</button>
+      <button class="btn" id="reloadBtn" type="button">重新读取</button>
+    </div>
+  </header>
+
+  <!-- 顶部 -->
+  <section class="panel topbar">
+    <div class="field">
+      <label class="field-label" for="periodSelect">统计周期（每月 26 日 ~ 次月 25 日）</label>
+      <select id="periodSelect" class="select" disabled></select>
+    </div>
+    <div class="stats">
+      <div class="stat stat-neg">
+        <div class="stat-label">扣分总数</div>
+        <div class="stat-value" id="negTotal">0</div>
+      </div>
+      <div class="stat stat-pos">
+        <div class="stat-label">加分总数</div>
+        <div class="stat-value" id="posTotal">0</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 警示框 -->
+  <section class="panel alert-panel">
+    <div class="alert-head">
+      <span>⚠ 未确认人员</span>
+      <span class="alert-count" id="alertCount">0</span>
+    </div>
+    <div class="alert-list" id="alertList"></div>
+  </section>
+
+  <!-- 气泡图 -->
+  <section class="panel">
+    <div class="panel-head">
+      <h2>分值汇总气泡图</h2>
+      <span class="hint">按住气泡可拖动 · 松手自动回中</span>
+    </div>
+    <div class="canvas-wrap" id="canvasWrap">
+      <canvas id="canvas"></canvas>
+    </div>
+  </section>
+
+  <!-- 明细表 -->
+  <section class="panel">
+    <div class="panel-head">
+      <h2>明细表</h2>
+      <span class="hint" id="rowCount"></span>
+    </div>
+    <div class="table-wrap">
+      <table id="detailTable">
+        <thead>
+          <tr>
+            <th class="col-date">日期</th>
+            <th class="col-name">名字</th>
+            <th>扣分项目</th>
+            <th>分值</th>
+            <th>本人确认</th>
+            <th>备注</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ============================================================
+   *  常量
+   * ============================================================ */
+  const FONT = '"PingFang SC","Hiragino Sans GB","Microsoft YaHei",-apple-system,"Segoe UI",sans-serif';
+  const HEADERS = ['日期', '名字', '扣分项目', '分值', '本人确认', '备注'];
+
+  /* 默认读取同目录下的 data.csv，可用 ?csv=xxx.csv 覆盖 */
+  const CSV_URL = (function () {
+    try {
+      const q = new URLSearchParams(location.search).get('csv');
+      return q && q.trim() ? q.trim() : 'data.csv';
+    } catch (e) { return 'data.csv'; }
+  })();
+
+  /* ============================================================
+   *  工具函数
+   * ============================================================ */
+  const pad2 = n => (n < 10 ? '0' + n : '' + n);
+  const fmtDate = d => d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
+  const esc = s => String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+
+  /** 日期所属的"统计周期"（26 号之后算下一个月） */
+  function periodOf(dateStr) {
+    const p = dateStr.split('-');
+    let y = +p[0], m = +p[1];
+    const d = +p[2];
+    if (d >= 26) { m += 1; if (m > 12) { m = 1; y += 1; } }
+    return y + '-' + pad2(m);
+  }
+
+  /** 周期对应的起止日期 */
+  function periodRange(ym) {
+    const p = ym.split('-');
+    const y = +p[0], m = +p[1];
+    const sy = m === 1 ? y - 1 : y;
+    const sm = m === 1 ? 12 : m - 1;
+    return { start: sy + '-' + pad2(sm) + '-26', end: y + '-' + pad2(m) + '-25' };
+  }
+
+  /* ============================================================
+   *  CSV 解析 / 序列化
+   * ============================================================ */
+  function parseCSV(text) {
+    text = text.replace(/^\uFEFF/, '');
+    const rows = [];
+    let row = [], field = '', inQ = false;
+    for (let i = 0; i < text.length; i++) {
+      const c = text[i];
+      if (inQ) {
+        if (c === '"') {
+          if (text[i + 1] === '"') { field += '"'; i++; }
+          else inQ = false;
+        } else field += c;
+      } else {
+        if (c === '"') inQ = true;
+        else if (c === ',') { row.push(field); field = ''; }
+        else if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
+        else if (c === '\r') { /* skip */ }
+        else field += c;
+      }
+    }
+    if (field !== '' || row.length) { row.push(field); rows.push(row); }
+    return rows.filter(r => r.some(c => String(c).trim() !== ''));
+  }
+
+  function rowsFromCSV(text) {
+    const table = parseCSV(text);
+    if (table.length < 2) return [];
+    const h = table[0].map(s => String(s).trim());
+    const iDate = h.indexOf('日期'), iName = h.indexOf('名字'), iItem = h.indexOf('扣分项目');
+    const iScore = h.indexOf('分值'), iConf = h.indexOf('本人确认'), iRemark = h.indexOf('备注');
+    const out = [];
+    for (let i = 1; i < table.length; i++) {
+      const r = table[i];
+      const raw = String(iScore >= 0 ? (r[iScore] || '') : '0').replace(/[^0-9+\-.]/g, '');
+      const score = parseFloat(raw) || 0;
+      const date = String(iDate >= 0 ? (r[iDate] || '') : '').trim();
+      const name = String(iName >= 0 ? (r[iName] || '') : '').trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !name) continue;
+      out.push({
+        date: date,
+        name: name,
+        item: String(iItem >= 0 ? (r[iItem] || '') : '').trim(),
+        score: score,
+        confirmed: String(iConf >= 0 ? (r[iConf] || '') : '').trim() === '是',
+        remark: String(iRemark >= 0 ? (r[iRemark] || '') : '').trim()
+      });
+    }
+    return out;
+  }
+
+  function toCSV(rows) {
+    const q = s => {
+      s = String(s == null ? '' : s);
+      return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    };
+    const lines = [HEADERS.join(',')];
+    for (const r of rows) {
+      lines.push([
+        r.date, r.name, r.item,
+        r.score > 0 ? '+' + r.score : String(r.score),
+        r.confirmed ? '是' : '否',
+        r.remark
+      ].map(q).join(','));
+    }
+    return lines.join('\n');
+  }
+
+  /* ============================================================
+   *  状态
+   * ============================================================ */
+  const state = { allRows: [], period: null, rows: [] };
+  let bubbles = [];
+
+  /* ============================================================
+   *  Canvas
+   * ============================================================ */
+  const wrap = document.getElementById('canvasWrap');
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+  let W = 0, H = 0, DPR = 1;
+
+  function resizeCanvas() {
+    const w = wrap.clientWidth, h = wrap.clientHeight;
+    if (!w || !h) return;
+    W = w; H = h;
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = Math.round(W * DPR);
+    canvas.height = Math.round(H * DPR);
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+
+  /* ============================================================
+   *  气泡构建
+   *  每个气泡 = 上方「加分圆」(红, 半透明) + 下方「扣分圆」(绿, 实心)
+   *  两圆上下重叠，圆心距 d = (rp + rn) * OVERLAP
+   *  (x, y) 为整个组合的几何中心
+   * ============================================================ */
+  const OVERLAP = 0.45;   // 重叠系数（越小重叠越多）
+
+  function updateMetrics(b) {
+    b.rx = Math.max(b.rp, b.rn);
+    b.ry = (b.rp > 0 && b.rn > 0) ? (b.rp + b.rn + b.d) / 2 : Math.max(b.rp, b.rn);
+  }
+
+  function buildPeople(rows) {
+    const map = new Map();
+    for (const r of rows) {
+      let p = map.get(r.name);
+      if (!p) { p = { name: r.name, neg: 0, pos: 0 }; map.set(r.name, p); }
+      if (r.score < 0) p.neg += -r.score;
+      else p.pos += r.score;
+    }
+    return Array.from(map.values());
+  }
+
+  function rebuildBubbles(people) {
+    if (!W || !H) { bubbles = []; return; }
+    if (!people.length) { bubbles = []; draw(); return; }
+
+    const prev = new Map(bubbles.map(b => [b.name, b]));
+    const cx = W / 2, cy = H / 2;
+    const base = Math.min(W, H);
+
+    const maxV = Math.max(1, ...people.map(p => Math.max(p.neg, p.pos)));
+
+    let rMax = Math.max(38, Math.min(86, base * 0.14));
+    let rMin = rMax * 0.44;
+    const cap = base * 0.25;
+    if (rMax > cap) { const k = cap / rMax; rMax *= k; rMin *= k; }
+    const rad = v => v > 0 ? rMin + (rMax - rMin) * Math.sqrt(v / maxV) : 0;
+
+    const list = people.map(p => {
+      const rp = rad(p.pos);          // 加分圆半径
+      const rn = rad(p.neg);          // 扣分圆半径
+      const both = rp > 0 && rn > 0;
+      const d = both ? (rp + rn) * OVERLAP : 0;
+      const old = prev.get(p.name);
+      const b = {
+        name: p.name, neg: p.neg, pos: p.pos,
+        rp: rp, rn: rn, d: d, rx: 0, ry: 0,
+        x: old ? old.x : cx + (Math.random() - 0.5) * base * 0.40,
+        y: old ? old.y : cy + (Math.random() - 0.5) * base * 0.40,
+        vx: 0, vy: 0, dragging: false
+      };
+      updateMetrics(b);
+      return b;
+    });
+
+    /* 密度自适应 */
+    const area = list.reduce((s, b) => s + Math.PI * (b.rp * b.rp + b.rn * b.rn), 0);
+    const avail = W * H * 0.55;
+    if (area > avail) {
+      const k = Math.max(0.5, Math.sqrt(avail / area));
+      for (const b of list) {
+        b.rp *= k; b.rn *= k; b.d *= k;
+        updateMetrics(b);
+      }
+    }
+
+    bubbles = list;
+    clampAll();
+    ensureLoop();
+  }
+
+  /* ============================================================
+   *  物理仿真
+   * ============================================================ */
+  function clampBubble(b) {
+    const pad = 4;
+    const minX = b.rx + pad, maxX = W - b.rx - pad;
+    const minY = b.ry + pad, maxY = H - b.ry - pad;
+    b.x = maxX < minX ? W / 2 : Math.min(Math.max(b.x, minX), maxX);
+    b.y = maxY < minY ? H / 2 : Math.min(Math.max(b.y, minY), maxY);
+  }
+  function clampAll() { for (const b of bubbles) clampBubble(b); }
+
+  function step() {
+    const cx = W / 2, cy = H / 2;
+    let active = false;
+
+    /* 1) 回中弹簧 + 阻尼 */
+    for (const b of bubbles) {
+      if (b.dragging) { active = true; continue; }
+      b.vx = (b.vx + (cx - b.x) * 0.011) * 0.87;
+      b.vy = (b.vy + (cy - b.y) * 0.011) * 0.87;
+      const sp = Math.hypot(b.vx, b.vy);
+      if (sp > 16) { b.vx = b.vx / sp * 16; b.vy = b.vy / sp * 16; }
+      b.x += b.vx; b.y += b.vy;
+      if (sp > 0.04 || Math.hypot(cx - b.x, cy - b.y) > 1.2) active = true;
+    }
+
+    /* 2) 椭圆近似的碰撞分离（多轮松弛） */
+    for (let it = 0; it < 4; it++) {
+      for (let i = 0; i < bubbles.length; i++) {
+        for (let j = i + 1; j < bubbles.length; j++) {
+          const a = bubbles[i], b = bubbles[j];
+          const dx = b.x - a.x, dy = b.y - a.y;
+          const sx = a.rx + b.rx, sy = a.ry + b.ry;
+          if (sx <= 0 || sy <= 0) continue;
+
+          const nx = dx / sx, ny = dy / sy;
+          let q = Math.hypot(nx, ny);
+          if (q >= 1) continue;
+          if (q < 1e-6) {
+            const ang = Math.random() * Math.PI * 2;
+            a.x -= Math.cos(ang) * 0.8; a.y -= Math.sin(ang) * 0.8;
+            b.x += Math.cos(ang) * 0.8; b.y += Math.sin(ang) * 0.8;
+            active = true;
+            continue;
+          }
+
+          const f = 1 / q - 1;
+          const ex = dx * f, ey = dy * f;
+
+          const wa = a.dragging ? 0 : 1;
+          const wb = b.dragging ? 0 : 1;
+          const ws = wa + wb;
+          if (!ws) continue;
+
+          a.x -= ex * wa / ws; a.y -= ey * wa / ws;
+          b.x += ex * wb / ws; b.y += ey * wb / ws;
+          active = true;
+        }
+      }
+    }
+
+    /* 3) 边界约束 */
+    for (const b of bubbles) {
+      const pad = 4;
+      const minX = b.rx + pad, maxX = W - b.rx - pad;
+      const minY = b.ry + pad, maxY = H - b.ry - pad;
+      const nx = maxX < minX ? W / 2 : Math.min(Math.max(b.x, minX), maxX);
+      const ny = maxY < minY ? H / 2 : Math.min(Math.max(b.y, minY), maxY);
+      if (nx !== b.x) { b.x = nx; b.vx *= -0.25; }
+      if (ny !== b.y) { b.y = ny; b.vy *= -0.25; }
+    }
+
+    return active;
+  }
+
+  /* ============================================================
+   *  绘制
+   * ============================================================ */
+  function centers(b) {
+    if (b.rp > 0 && b.rn > 0) {
+      const yPos = b.y - (b.d + b.rn - b.rp) / 2;
+      return { x: b.x, yPos: yPos, yNeg: yPos + b.d };
+    }
+    if (b.rp > 0) return { x: b.x, yPos: b.y, yNeg: b.y };
+    return { x: b.x, yPos: b.y, yNeg: b.y };
+  }
+
+  /** 下层：扣分圆（绿色，实心） */
+  function drawNegCircle(b) {
+    if (b.rn <= 0) return;
+    const c = centers(b);
+    const r = b.rn;
+
+    ctx.save();
+    ctx.shadowColor = 'rgba(34,197,94,.42)';
+    ctx.shadowBlur = 16;
+    ctx.beginPath();
+    ctx.arc(c.x, c.yNeg, r, 0, Math.PI * 2);
+    const g = ctx.createRadialGradient(
+      c.x - r * 0.32, c.yNeg - r * 0.36, r * 0.06, c.x, c.yNeg, r);
+    g.addColorStop(0, '#5ee08a');
+    g.addColorStop(0.55, '#22c55e');
+    g.addColorStop(1, '#15803d');
+    ctx.fillStyle = g;
+    ctx.fill();
+    ctx.restore();
+
+    ctx.beginPath();
+    ctx.arc(c.x, c.yNeg, r - 0.5, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(134,239,172,.55)';
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+  }
+
+  /** 上层：加分圆（红色，半透明 —— 可透出下方扣分圆） */
+  function drawPosCircle(b) {
+    if (b.rp <= 0) return;
+    const c = centers(b);
+    const r = b.rp;
+
+    ctx.beginPath();
+    ctx.arc(c.x, c.yPos, r, 0, Math.PI * 2);
+    const g = ctx.createRadialGradient(
+      c.x - r * 0.32, c.yPos - r * 0.36, r * 0.06, c.x, c.yPos, r);
+    g.addColorStop(0, 'rgba(252,165,165,0.66)');
+    g.addColorStop(0.6, 'rgba(239,68,68,0.50)');
+    g.addColorStop(1, 'rgba(185,28,28,0.42)');
+    ctx.fillStyle = g;
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.arc(c.x, c.yPos, r - 0.5, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(254,202,202,.78)';
+    ctx.lineWidth = 1.4;
+    ctx.stroke();
+  }
+
+  /** 标签：名字居中偏上；"+n" 吸附加分圆左侧内缘；"-n" 吸附扣分圆右侧内缘 */
+  function drawLabels(b) {
+    const c = centers(b);
+    const base = Math.max(b.rp, b.rn, 1);
+
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor = 'rgba(0,0,0,.55)';
+    ctx.shadowBlur = 3;
+
+    /* 名字 */
+    let nameY;
+    if (b.rp >= base * 0.62) nameY = c.yPos - b.rp * 0.52;
+    else if (b.rn > 0) nameY = c.yNeg - b.rn * 0.58;
+    else nameY = b.y;
+
+    const nameSize = Math.max(9, Math.min(15, base * 0.27));
+    ctx.textAlign = 'center';
+    ctx.fillStyle = 'rgba(255,255,255,.98)';
+    ctx.font = '600 ' + nameSize.toFixed(1) + 'px ' + FONT;
+    ctx.fillText(b.name, c.x, nameY);
+
+    /* 数字 */
+    const cand = [];
+    if (b.rp > 0) cand.push(b.rp);
+    if (b.rn > 0) cand.push(b.rn);
+    const numBase = cand.length ? Math.min.apply(null, cand) : base;
+    const numSize = Math.max(9, Math.min(15, numBase * 0.36));
+    ctx.font = '700 ' + numSize.toFixed(1) + 'px ' + FONT;
+
+    if (b.rp > 0 && b.pos > 0) {
+      ctx.textAlign = 'left';
+      ctx.fillText('+' + b.pos, c.x - b.rp * 0.86, c.yPos);
+    }
+    if (b.rn > 0 && b.neg > 0) {
+      ctx.textAlign = 'right';
+      ctx.fillText('-' + b.neg, c.x + b.rn * 0.86, c.yNeg);
+    }
+
+    ctx.shadowBlur = 0;
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    if (!bubbles.length) {
+      ctx.fillStyle = 'rgba(148,163,184,.55)';
+      ctx.font = '13px ' + FONT;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('暂无数据', W / 2, H / 2);
+      return;
+    }
+
+    const order = bubbles.slice();
+    const di = order.findIndex(b => b.dragging);
+    if (di >= 0) { const d = order.splice(di, 1)[0]; order.push(d); }
+
+    for (const b of order) drawNegCircle(b);   // 扣分圆在下
+    for (const b of order) drawPosCircle(b);   // 加分圆在上（半透明）
+    for (const b of order) drawLabels(b);      // 文字最上层
+  }
+
+  /* ============================================================
+   *  主循环
+   * ============================================================ */
+  let rafId = null;
+  let dragging = false;
+
+  function ensureLoop() { if (rafId === null) rafId = requestAnimationFrame(tick); }
+
+  function tick() {
+    rafId = null;
+    const active = step();
+    draw();
+    if (active || dragging) ensureLoop();
+  }
+
+  /* ============================================================
+   *  指针交互
+   * ============================================================ */
+  let dragTarget = null, dragId = null, offX = 0, offY = 0;
+
+  function localPos(e) {
+    const r = canvas.getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  }
+
+  function hitTest(p) {
+    for (let i = bubbles.length - 1; i >= 0; i--) {
+      const b = bubbles[i];
+      const c = centers(b);
+      const dx = p.x - c.x;
+      if (b.rn > 0) {
+        const dy = p.y - c.yNeg;
+        if (dx * dx + dy * dy <= b.rn * b.rn) return b;
+      }
+      if (b.rp > 0) {
+        const dy = p.y - c.yPos;
+        if (dx * dx + dy * dy <= b.rp * b.rp) return b;
+      }
+    }
+    return null;
+  }
+
+  canvas.addEventListener('pointerdown', function (e) {
+    const p = localPos(e);
+    const hit = hitTest(p);
+    if (!hit) return;
+
+    dragTarget = hit;
+    dragId = e.pointerId;
+    dragging = true;
+    hit.dragging = true;
+    hit.vx = hit.vy = 0;
+    offX = hit.x - p.x;
+    offY = hit.y - p.y;
+
+    const idx = bubbles.indexOf(hit);
+    if (idx >= 0) { bubbles.splice(idx, 1); bubbles.push(hit); }
+
+    try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
+    e.preventDefault();
+    ensureLoop();
+  });
+
+  canvas.addEventListener('pointermove', function (e) {
+    if (!dragTarget || e.pointerId !== dragId) return;
+    const p = localPos(e);
+    dragTarget.x = p.x + offX;
+    dragTarget.y = p.y + offY;
+    clampBubble(dragTarget);
+    e.preventDefault();
+    ensureLoop();
+  });
+
+  function endDrag(e) {
+    if (!dragTarget) return;
+    if (e && e.pointerId !== dragId) return;
+    dragTarget.dragging = false;
+    dragTarget = null;
+    dragId = null;
+    dragging = false;
+    ensureLoop();
+  }
+  canvas.addEventListener('pointerup', endDrag);
+  canvas.addEventListener('pointercancel', endDrag);
+  canvas.addEventListener('lostpointercapture', endDrag);
+
+  /* ============================================================
+   *  渲染总入口
+   * ============================================================ */
+  const elNegTotal  = document.getElementById('negTotal');
+  const elPosTotal  = document.getElementById('posTotal');
+  const elAlertList = document.getElementById('alertList');
+  const elAlertCnt  = document.getElementById('alertCount');
+  const elRowCount  = document.getElementById('rowCount');
+  const elPeriod    = document.getElementById('periodSelect');
+  const elSrcBadge  = document.getElementById('srcBadge');
+  const tbody       = document.querySelector('#detailTable tbody');
+
+  function render() {
+    /* ---- 空状态（没有周期 = 没有数据） ---- */
+    if (!state.period) {
+      elNegTotal.textContent = '0';
+      elPosTotal.textContent = '0';
+      elAlertCnt.textContent = '0';
+      elAlertList.innerHTML = '<span class="alert-none muted">暂无数据</span>';
+      elRowCount.textContent = '0 条记录';
+      tbody.innerHTML = '<tr><td colspan="6" class="empty-cell">暂无数据</td></tr>';
+      rebuildBubbles([]);
+      return;
+    }
+
+    const range = periodRange(state.period);
+    const rows = state.allRows.filter(r => r.date >= range.start && r.date <= range.end);
+    state.rows = rows;
+
+    /* ---- 汇总 ---- */
+    let neg = 0, pos = 0;
+    for (const r of rows) {
+      if (r.score < 0) neg += -r.score;
+      else pos += r.score;
+    }
+    elNegTotal.textContent = neg;
+    elPosTotal.textContent = pos;
+
+    /* ---- 警示框 ---- */
+    const unconfirmed = rows.filter(r => !r.confirmed);
+    elAlertCnt.textContent = unconfirmed.length;
+    if (!unconfirmed.length) {
+      elAlertList.innerHTML = rows.length
+        ? '<span class="alert-none">本周期全部已确认 ✓</span>'
+        : '<span class="alert-none muted">暂无数据</span>';
+    } else {
+      const seen = new Set();
+      const html = [];
+      for (const r of unconfirmed) {
+        const key = r.name + '|' + r.date;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        html.push('<span class="chip">' + esc(r.name) + '<em>' + esc(r.date) + '</em></span>');
+      }
+      elAlertList.innerHTML = html.join('');
+    }
+
+    /* ---- 气泡图 ---- */
+    rebuildBubbles(buildPeople(rows));
+
+    /* ---- 明细表 ---- */
+    elRowCount.textContent = rows.length + ' 条记录';
+    if (!rows.length) {
+      tbody.innerHTML = '<tr><td colspan="6" class="empty-cell">当前周期暂无数据</td></tr>';
+    } else {
+      tbody.innerHTML = rows.map(function (r) {
+        const cls = r.score < 0 ? 'v-neg' : 'v-pos';
+        const txt = r.score > 0 ? '+' + r.score : String(r.score);
+        return '<tr>' +
+          '<td class="col-date">' + esc(r.date) + '</td>' +
+          '<td class="col-name">' + esc(r.name) + '</td>' +
+          '<td>' + esc(r.item) + '</td>' +
+          '<td class="' + cls + '">' + txt + '</td>' +
+          '<td class="' + (r.confirmed ? '' : 'v-no') + '">' + (r.confirmed ? '是' : '否') + '</td>' +
+          '<td>' + esc(r.remark) + '</td>' +
+          '</tr>';
+      }).join('');
+    }
+  }
+
+  /* ============================================================
+   *  周期选择器
+   * ============================================================ */
+  function buildPeriodOptions() {
+    const set = new Set(state.allRows.map(r => periodOf(r.date)));
+    const list = Array.from(set).sort();
+    const keep = state.period;
+
+    if (!list.length) {
+      elPeriod.innerHTML = '<option value="">暂无数据</option>';
+      elPeriod.disabled = true;
+      state.period = '';
+      return;
+    }
+
+    elPeriod.disabled = false;
+    const todayPeriod = periodOf(fmtDate(new Date()));
+    const def = list.indexOf(keep) >= 0 ? keep
+      : (list.indexOf(todayPeriod) >= 0 ? todayPeriod : list[list.length - 1]);
+
+    elPeriod.innerHTML = list.map(function (p) {
+      const rg = periodRange(p);
+      const parts = p.split('-');
+      const label = parts[0] + '年' + (+parts[1]) + '月';
+      return '<option value="' + p + '">' + label +
+        '（' + rg.start.slice(5) + ' ~ ' + rg.end.slice(5) + '）</option>';
+    }).join('');
+
+    state.period = elPeriod.value = def;
+  }
+
+  elPeriod.addEventListener('change', function () {
+    state.period = elPeriod.value;
+    render();
+  });
+
+  /* ============================================================
+   *  数据装载
+   * ============================================================ */
+  function loadData(rows) {
+    state.allRows = rows;
+    buildPeriodOptions();
+    render();
+  }
+
+  /* 读取同目录 CSV（带时间戳绕过缓存） */
+  async function fetchCSV() {
+    const url = CSV_URL + (CSV_URL.indexOf('?') >= 0 ? '&' : '?') + 'v=' + Date.now();
+    const res = await fetch(url, { cache: 'no-store' });
+    if (!res.ok) throw new Error('HTTP ' + res.status + ' ' + res.statusText);
+    const text = await res.text();
+    return rowsFromCSV(text);   // 可能为空数组（无有效数据行）
+  }
+
+  async function init() {
+    resizeCanvas();
+    elSrcBadge.classList.remove('err');
+    elSrcBadge.textContent = '加载中…';
+
+    let rows = [];
+    let ok = false;
+    let errMsg = '';
+    try {
+      rows = await fetchCSV();
+      ok = true;
+    } catch (e) {
+      errMsg = e && e.message ? e.message : String(e);
+      console.warn('[仪表盘] 读取 ' + CSV_URL + ' 失败：', e);
+    }
+
+    loadData(rows);
+
+    if (ok) {
+      elSrcBadge.textContent = rows.length
+        ? ('数据源：' + CSV_URL)
+        : ('数据源：' + CSV_URL + '（无有效数据行）');
+      elSrcBadge.title = '页面加载时自动读取同目录 ' + CSV_URL;
+    } else {
+      elSrcBadge.classList.add('err');
+      elSrcBadge.textContent = '未读取到 ' + CSV_URL;
+      elSrcBadge.title = '读取失败：' + errMsg +
+        '\n请确认 ' + CSV_URL + ' 与本 HTML 位于同一目录，且通过 http(s) 访问（如 GitHub Pages）。';
+    }
+
+    ensureLoop();
+  }
+
+  /* 重新读取按钮 */
+  document.getElementById('reloadBtn').addEventListener('click', function () {
+    init();
+  });
+
+  /* ============================================================
+   *  导出
+   * ============================================================ */
+  document.getElementById('exportBtn').addEventListener('click', function () {
+    const csv = toCSV(state.allRows);
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'data.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+  });
+
+  /* ============================================================
+   *  尺寸监听
+   * ============================================================ */
+  let resizeTimer = null;
+  function onResize() {
+    resizeCanvas();
+    clampAll();
+    draw();
+    ensureLoop();
+  }
+  if (window.ResizeObserver) {
+    new ResizeObserver(function () {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(onResize, 60);
+    }).observe(wrap);
+  } else {
+    window.addEventListener('resize', function () {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(onResize, 120);
+    });
+  }
+
+  /* ============================================================
+   *  启动
+   * ============================================================ */
+  if (document.readyState === 'complete' || document.readyState === 'interactive') {
+    requestAnimationFrame(init);
+  } else {
+    window.addEventListener('DOMContentLoaded', function () {
+      requestAnimationFrame(init);
+    });
+  }
+
+})();
+</script>
+</body>
+</html>
