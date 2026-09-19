@@ -195,8 +195,8 @@
   const CSV_URL = (function () {
     try {
       const q = new URLSearchParams(location.search).get('csv');
-      return q && q.trim() ? q.trim() : 'data/data.csv';
-    } catch (e) { return 'data/data.csv'; }
+      return q && q.trim() ? q.trim() : 'data.csv';
+    } catch (e) { return 'data.csv'; }
   })();
 
   const OVERLAP = 0.45;
