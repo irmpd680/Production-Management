@@ -36,10 +36,12 @@
          border-radius:16px;padding:14px;}
 
   /* ---------- 顶部：周期 + 汇总 ---------- */
-  .topbar{display:grid;grid-template-columns:minmax(240px,1fr) minmax(260px,auto);gap:14px;align-items:end;}
+  .topbar{display:grid;grid-template-columns:minmax(280px,1fr) minmax(260px,auto);gap:14px;align-items:end;}
   @media(max-width:760px){.topbar{grid-template-columns:1fr;align-items:stretch;}}
   .field{display:flex;flex-direction:column;gap:6px;}
-  .field-label{font-size:12px;color:#8b9bb4;letter-spacing:.4px;}
+  .field-label{font-size:12px;color:#8b9bb4;letter-spacing:.4px;display:flex;align-items:baseline;flex-wrap:wrap;gap:8px;}
+  .range-hint{color:#6b7c96;font-weight:400;font-size:11px;}
+  .period-row{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
   .select{font:inherit;font-size:14px;padding:9px 12px;border-radius:10px;
           background:#152036;color:#e6edf7;border:1px solid rgba(255,255,255,.14);width:100%;}
   .select:focus{outline:none;border-color:#3b82f6;}
@@ -87,7 +89,6 @@
   tbody tr:nth-child(even) td{background:#0d1626;}
   tbody tr:last-child td{border-bottom:none;}
 
-  /* 冻结列 */
   th.col-date,td.col-date{position:sticky;left:0;z-index:4;width:110px;min-width:110px;}
   th.col-name,td.col-name{position:sticky;left:110px;z-index:4;width:80px;min-width:80px;}
   thead th.col-date,thead th.col-name{z-index:7;}
@@ -115,8 +116,14 @@
   <!-- 顶部 -->
   <section class="panel topbar">
     <div class="field">
-      <label class="field-label" for="periodSelect">统计周期（每月 26 日 ~ 次月 25 日）</label>
-      <select id="periodSelect" class="select" disabled></select>
+      <label class="field-label" for="yearSelect">
+        统计周期（每月 26 日 ~ 次月 25 日）
+        <span class="range-hint" id="rangeHint"></span>
+      </label>
+      <div class="period-row">
+        <select id="yearSelect" class="select" disabled></select>
+        <select id="monthSelect" class="select" disabled></select>
+      </div>
     </div>
     <div class="stats">
       <div class="stat stat-neg">
@@ -184,44 +191,46 @@
    * ============================================================ */
   const FONT = '"PingFang SC","Hiragino Sans GB","Microsoft YaHei",-apple-system,"Segoe UI",sans-serif';
 
-  /* CSV 路径：相对于本 HTML 文件所在目录
-   * 若 HTML 在仓库根目录、CSV 在 data/ 子目录 → 'data.csv'
-   * 若 CSV 与 HTML 同目录 → 'data.csv'
-   * 也可用 ?csv=xxx.csv 覆盖 */
+  /* CSV 路径：相对于本 HTML 文件所在目录 */
   const CSV_URL = (function () {
     try {
       const q = new URLSearchParams(location.search).get('csv');
-      return q && q.trim() ? q.trim() : 'data.csv';
-    } catch (e) { return 'data.csv'; }
+      return q && q.trim() ? q.trim() : 'data/data.csv';
+    } catch (e) { return 'data/data.csv'; }
   })();
 
-  /* 重叠系数：越小，加分圆与扣分圆重叠越多 */
   const OVERLAP = 0.45;
 
   /* ============================================================
    *  工具函数
    * ============================================================ */
   const pad2 = n => (n < 10 ? '0' + n : '' + n);
-  const fmtDate = d => d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
   const esc = s => String(s == null ? '' : s)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
 
-  /** 日期所属的“统计周期”（26 号之后算下一个月） */
-  function periodOf(dateStr) {
-    const p = dateStr.split('-');
-    let y = +p[0], m = +p[1];
-    const d = +p[2];
-    if (d >= 26) { m += 1; if (m > 12) { m = 1; y += 1; } }
-    return y + '-' + pad2(m);
+  /** 计算某条记录所属的“统计年月”（26 号之后算下一个月） */
+  function statOf(dateStr) {
+    const y = +dateStr.slice(0, 4);
+    let m = +dateStr.slice(5, 7);
+    const d = +dateStr.slice(8, 10);
+    if (d >= 26) {
+      m += 1;
+      if (m > 12) { m = 1; return { y: y + 1, m: 1 }; }
+      return { y: y, m: m };
+    }
+    return { y: y, m: m };
   }
 
-  /** 周期对应的起止日期 */
-  function periodRange(ym) {
-    const p = ym.split('-');
-    const y = +p[0], m = +p[1];
-    const sy = m === 1 ? y - 1 : y;
-    const sm = m === 1 ? 12 : m - 1;
+  /** 某统计年的起止日期 */
+  function yearRange(y) {
+    return { start: (y - 1) + '-12-26', end: y + '-12-25' };
+  }
+
+  /** 某统计月的起止日期 */
+  function monthRange(y, m) {
+    let sy = y, sm = m - 1;
+    if (sm < 1) { sm = 12; sy = y - 1; }
     return { start: sy + '-' + pad2(sm) + '-26', end: y + '-' + pad2(m) + '-25' };
   }
 
@@ -280,11 +289,16 @@
   /* ============================================================
    *  状态
    * ============================================================ */
-  const state = { allRows: [], period: null, rows: [] };
+  const state = {
+    allRows: [],
+    year: null,      // 数字年份，必选
+    month: null,     // 1-12，null 表示“全部月份”
+    rows: []
+  };
   let bubbles = [];
 
   /* ============================================================
-   *  Canvas 初始化
+   *  Canvas
    * ============================================================ */
   const wrap = document.getElementById('canvasWrap');
   const canvas = document.getElementById('canvas');
@@ -355,7 +369,6 @@
       return b;
     });
 
-    /* 密度自适应 */
     const area = list.reduce((s, b) => s + Math.PI * (b.rp * b.rp + b.rn * b.rn), 0);
     const avail = W * H * 0.55;
     if (area > avail) {
@@ -387,7 +400,6 @@
     const cx = W / 2, cy = H / 2;
     let active = false;
 
-    /* 1) 回中弹簧 + 阻尼 */
     for (const b of bubbles) {
       if (b.dragging) { active = true; continue; }
       b.vx = (b.vx + (cx - b.x) * 0.011) * 0.87;
@@ -398,7 +410,6 @@
       if (sp > 0.04 || Math.hypot(cx - b.x, cy - b.y) > 1.2) active = true;
     }
 
-    /* 2) 椭圆近似的碰撞分离（多轮松弛） */
     for (let it = 0; it < 4; it++) {
       for (let i = 0; i < bubbles.length; i++) {
         for (let j = i + 1; j < bubbles.length; j++) {
@@ -406,7 +417,6 @@
           const dx = b.x - a.x, dy = b.y - a.y;
           const sx = a.rx + b.rx, sy = a.ry + b.ry;
           if (sx <= 0 || sy <= 0) continue;
-
           const nx = dx / sx, ny = dy / sy;
           const q = Math.hypot(nx, ny);
           if (q >= 1) continue;
@@ -417,15 +427,12 @@
             active = true;
             continue;
           }
-
           const f = 1 / q - 1;
           const ex = dx * f, ey = dy * f;
-
           const wa = a.dragging ? 0 : 1;
           const wb = b.dragging ? 0 : 1;
           const ws = wa + wb;
           if (!ws) continue;
-
           a.x -= ex * wa / ws; a.y -= ey * wa / ws;
           b.x += ex * wb / ws; b.y += ey * wb / ws;
           active = true;
@@ -433,7 +440,6 @@
       }
     }
 
-    /* 3) 边界约束 */
     for (const b of bubbles) {
       const pad = 4;
       const minX = b.rx + pad, maxX = W - b.rx - pad;
@@ -459,12 +465,10 @@
     return { x: b.x, yPos: b.y, yNeg: b.y };
   }
 
-  /** 下层：扣分圆（绿色，实心） */
   function drawNegCircle(b) {
     if (b.rn <= 0) return;
     const c = centers(b);
     const r = b.rn;
-
     ctx.save();
     ctx.shadowColor = 'rgba(34,197,94,.42)';
     ctx.shadowBlur = 16;
@@ -486,12 +490,10 @@
     ctx.stroke();
   }
 
-  /** 上层：加分圆（红色，半透明 —— 可透出下方扣分圆） */
   function drawPosCircle(b) {
     if (b.rp <= 0) return;
     const c = centers(b);
     const r = b.rp;
-
     ctx.beginPath();
     ctx.arc(c.x, c.yPos, r, 0, Math.PI * 2);
     const g = ctx.createRadialGradient(
@@ -509,7 +511,6 @@
     ctx.stroke();
   }
 
-  /** 标签：名字居中偏上；"+n" 吸附加分圆左侧内缘；"-n" 吸附扣分圆右侧内缘 */
   function drawLabels(b) {
     const c = centers(b);
     const base = Math.max(b.rp, b.rn, 1);
@@ -518,7 +519,6 @@
     ctx.shadowColor = 'rgba(0,0,0,.55)';
     ctx.shadowBlur = 3;
 
-    /* 名字 */
     let nameY;
     if (b.rp >= base * 0.62) nameY = c.yPos - b.rp * 0.52;
     else if (b.rn > 0) nameY = c.yNeg - b.rn * 0.58;
@@ -530,7 +530,6 @@
     ctx.font = '600 ' + nameSize.toFixed(1) + 'px ' + FONT;
     ctx.fillText(b.name, c.x, nameY);
 
-    /* 数字 */
     const cand = [];
     if (b.rp > 0) cand.push(b.rp);
     if (b.rn > 0) cand.push(b.rn);
@@ -565,9 +564,9 @@
     const di = order.findIndex(b => b.dragging);
     if (di >= 0) { const d = order.splice(di, 1)[0]; order.push(d); }
 
-    for (const b of order) drawNegCircle(b);   // 扣分圆在下
-    for (const b of order) drawPosCircle(b);   // 加分圆在上（半透明）
-    for (const b of order) drawLabels(b);      // 文字最上层
+    for (const b of order) drawNegCircle(b);
+    for (const b of order) drawPosCircle(b);
+    for (const b of order) drawLabels(b);
   }
 
   /* ============================================================
@@ -664,28 +663,47 @@
   const elAlertList = document.getElementById('alertList');
   const elAlertCnt  = document.getElementById('alertCount');
   const elRowCount  = document.getElementById('rowCount');
-  const elPeriod    = document.getElementById('periodSelect');
+  const elYear      = document.getElementById('yearSelect');
+  const elMonth     = document.getElementById('monthSelect');
+  const elRangeHint = document.getElementById('rangeHint');
   const elSrcBadge  = document.getElementById('srcBadge');
   const tbody       = document.querySelector('#detailTable tbody');
 
+  /** 根据年份和月份过滤数据 */
+  function filterRows() {
+    if (state.year === null) return [];
+    let rows = state.allRows.filter(r => statOf(r.date).y === state.year);
+    if (state.month !== null) {
+      rows = rows.filter(r => statOf(r.date).m === state.month);
+    }
+    return rows;
+  }
+
+  /** 更新范围提示 */
+  function updateRangeHint() {
+    if (state.year === null) { elRangeHint.textContent = ''; return; }
+    const rg = state.month === null
+      ? yearRange(state.year)
+      : monthRange(state.year, state.month);
+    elRangeHint.textContent = rg.start + ' ~ ' + rg.end;
+  }
+
   function render() {
-    /* ---- 空状态（没有周期 = 没有数据） ---- */
-    if (!state.period) {
+    if (state.year === null) {
       elNegTotal.textContent = '0';
       elPosTotal.textContent = '0';
       elAlertCnt.textContent = '0';
       elAlertList.innerHTML = '<span class="alert-none muted">暂无数据</span>';
       elRowCount.textContent = '0 条记录';
       tbody.innerHTML = '<tr><td colspan="6" class="empty-cell">暂无数据</td></tr>';
+      elRangeHint.textContent = '';
       rebuildBubbles([]);
       return;
     }
 
-    const range = periodRange(state.period);
-    const rows = state.allRows.filter(r => r.date >= range.start && r.date <= range.end);
+    const rows = filterRows();
     state.rows = rows;
 
-    /* ---- 汇总 ---- */
     let neg = 0, pos = 0;
     for (const r of rows) {
       if (r.score < 0) neg += -r.score;
@@ -694,7 +712,6 @@
     elNegTotal.textContent = neg;
     elPosTotal.textContent = pos;
 
-    /* ---- 警示框 ---- */
     const unconfirmed = rows.filter(r => !r.confirmed);
     elAlertCnt.textContent = unconfirmed.length;
     if (!unconfirmed.length) {
@@ -713,10 +730,8 @@
       elAlertList.innerHTML = html.join('');
     }
 
-    /* ---- 气泡图 ---- */
     rebuildBubbles(buildPeople(rows));
 
-    /* ---- 明细表 ---- */
     elRowCount.textContent = rows.length + ' 条记录';
     if (!rows.length) {
       tbody.innerHTML = '<tr><td colspan="6" class="empty-cell">当前周期暂无数据</td></tr>';
@@ -734,41 +749,91 @@
           '</tr>';
       }).join('');
     }
+
+    updateRangeHint();
   }
 
   /* ============================================================
-   *  周期选择器
+   *  下拉框构建与事件
    * ============================================================ */
-  function buildPeriodOptions() {
-    const set = new Set(state.allRows.map(r => periodOf(r.date)));
-    const list = Array.from(set).sort();
-    const keep = state.period;
 
-    if (!list.length) {
-      elPeriod.innerHTML = '<option value="">暂无数据</option>';
-      elPeriod.disabled = true;
-      state.period = '';
+  /** 所有有数据的统计年（降序） */
+  function getAllYears() {
+    const set = new Set();
+    for (const r of state.allRows) set.add(statOf(r.date).y);
+    return Array.from(set).sort((a, b) => b - a);
+  }
+
+  /** 某统计年有数据的月份（降序） */
+  function getMonthsOfYear(y) {
+    const set = new Set();
+    for (const r of state.allRows) {
+      const s = statOf(r.date);
+      if (s.y === y) set.add(s.m);
+    }
+    return Array.from(set).sort((a, b) => b - a);
+  }
+
+  function buildYearOptions() {
+    const years = getAllYears();
+
+    if (!years.length) {
+      elYear.innerHTML = '<option value="">暂无数据</option>';
+      elYear.disabled = true;
+      state.year = null;
+      state.month = null;
       return;
     }
 
-    elPeriod.disabled = false;
-    const todayPeriod = periodOf(fmtDate(new Date()));
-    const def = list.indexOf(keep) >= 0 ? keep
-      : (list.indexOf(todayPeriod) >= 0 ? todayPeriod : list[list.length - 1]);
+    elYear.disabled = false;
 
-    elPeriod.innerHTML = list.map(function (p) {
-      const rg = periodRange(p);
-      const parts = p.split('-');
-      const label = parts[0] + '年' + (+parts[1]) + '月';
-      return '<option value="' + p + '">' + label +
-        '（' + rg.start.slice(5) + ' ~ ' + rg.end.slice(5) + '）</option>';
+    // 若当前选中的年份已不在列表，则切换到最新年
+    if (state.year === null || years.indexOf(state.year) < 0) {
+      state.year = years[0];
+    }
+
+    elYear.innerHTML = years.map(function (y) {
+      return '<option value="' + y + '">' + y + '年</option>';
     }).join('');
-
-    state.period = elPeriod.value = def;
+    elYear.value = String(state.year);
   }
 
-  elPeriod.addEventListener('change', function () {
-    state.period = elPeriod.value;
+  function buildMonthOptions() {
+    if (state.year === null) {
+      elMonth.innerHTML = '<option value="">全部月份</option>';
+      elMonth.disabled = true;
+      state.month = null;
+      return;
+    }
+
+    const months = getMonthsOfYear(state.year);
+    elMonth.disabled = false;
+
+    // 若当前选中的月份在该年无数据，则回到“全部月份”
+    if (state.month !== null && months.indexOf(state.month) < 0) {
+      state.month = null;
+    }
+
+    let html = '<option value="">全部月份</option>';
+    for (const m of months) {
+      html += '<option value="' + m + '">' + m + '月</option>';
+    }
+    elMonth.innerHTML = html;
+    elMonth.value = state.month === null ? '' : String(state.month);
+  }
+
+  elYear.addEventListener('change', function () {
+    const v = elYear.value;
+    state.year = v === '' ? null : +v;
+    // 换年份时清空月份，避免残留无效值
+    state.month = null;
+    buildMonthOptions();
+    render();
+  });
+
+  elMonth.addEventListener('change', function () {
+    const v = elMonth.value;
+    state.month = v === '' ? null : +v;
     render();
   });
 
@@ -777,7 +842,11 @@
    * ============================================================ */
   function loadData(rows) {
     state.allRows = rows;
-    buildPeriodOptions();
+    state.year = null;
+    state.month = null;
+
+    buildYearOptions();
+    buildMonthOptions();
     render();
   }
 
