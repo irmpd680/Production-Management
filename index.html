@@ -29,6 +29,7 @@
        background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.14);
        color:#e6edf7;transition:.15s;user-select:none;display:inline-flex;align-items:center;}
   .btn:hover{background:rgba(255,255,255,.15);}
+  .btn:active{background:rgba(255,255,255,.20);}
 
   /* ---------- 通用面板 ---------- */
   .panel{background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.085);
@@ -107,7 +108,6 @@
   <header class="hd">
     <h1>上下料奖惩仪表盘 <span class="src-badge" id="srcBadge">加载中…</span></h1>
     <div class="hd-actions">
-      <button class="btn" id="exportBtn" type="button">导出 CSV</button>
       <button class="btn" id="reloadBtn" type="button">重新读取</button>
     </div>
   </header>
@@ -180,18 +180,23 @@
   'use strict';
 
   /* ============================================================
-   *  常量
+   *  常量与配置
    * ============================================================ */
   const FONT = '"PingFang SC","Hiragino Sans GB","Microsoft YaHei",-apple-system,"Segoe UI",sans-serif';
-  const HEADERS = ['日期', '名字', '扣分项目', '分值', '本人确认', '备注'];
 
-  /* 默认读取同目录下的 data.csv，可用 ?csv=xxx.csv 覆盖 */
+  /* CSV 路径：相对于本 HTML 文件所在目录
+   * 若 HTML 在仓库根目录、CSV 在 data/ 子目录 → 'data/data.csv'
+   * 若 CSV 与 HTML 同目录 → 'data.csv'
+   * 也可用 ?csv=xxx.csv 覆盖 */
   const CSV_URL = (function () {
     try {
       const q = new URLSearchParams(location.search).get('csv');
-      return q && q.trim() ? q.trim() : 'data.csv';
-    } catch (e) { return 'data.csv'; }
+      return q && q.trim() ? q.trim() : 'data/data.csv';
+    } catch (e) { return 'data/data.csv'; }
   })();
+
+  /* 重叠系数：越小，加分圆与扣分圆重叠越多 */
+  const OVERLAP = 0.45;
 
   /* ============================================================
    *  工具函数
@@ -202,7 +207,7 @@
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
 
-  /** 日期所属的"统计周期"（26 号之后算下一个月） */
+  /** 日期所属的“统计周期”（26 号之后算下一个月） */
   function periodOf(dateStr) {
     const p = dateStr.split('-');
     let y = +p[0], m = +p[1];
@@ -221,10 +226,10 @@
   }
 
   /* ============================================================
-   *  CSV 解析 / 序列化
+   *  CSV 解析
    * ============================================================ */
   function parseCSV(text) {
-    text = text.replace(/^\uFEFF/, '');
+    text = String(text).replace(/^\uFEFF/, '');
     const rows = [];
     let row = [], field = '', inQ = false;
     for (let i = 0; i < text.length; i++) {
@@ -272,23 +277,6 @@
     return out;
   }
 
-  function toCSV(rows) {
-    const q = s => {
-      s = String(s == null ? '' : s);
-      return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
-    };
-    const lines = [HEADERS.join(',')];
-    for (const r of rows) {
-      lines.push([
-        r.date, r.name, r.item,
-        r.score > 0 ? '+' + r.score : String(r.score),
-        r.confirmed ? '是' : '否',
-        r.remark
-      ].map(q).join(','));
-    }
-    return lines.join('\n');
-  }
-
   /* ============================================================
    *  状态
    * ============================================================ */
@@ -296,7 +284,7 @@
   let bubbles = [];
 
   /* ============================================================
-   *  Canvas
+   *  Canvas 初始化
    * ============================================================ */
   const wrap = document.getElementById('canvasWrap');
   const canvas = document.getElementById('canvas');
@@ -315,12 +303,7 @@
 
   /* ============================================================
    *  气泡构建
-   *  每个气泡 = 上方「加分圆」(红, 半透明) + 下方「扣分圆」(绿, 实心)
-   *  两圆上下重叠，圆心距 d = (rp + rn) * OVERLAP
-   *  (x, y) 为整个组合的几何中心
    * ============================================================ */
-  const OVERLAP = 0.45;   // 重叠系数（越小重叠越多）
-
   function updateMetrics(b) {
     b.rx = Math.max(b.rp, b.rn);
     b.ry = (b.rp > 0 && b.rn > 0) ? (b.rp + b.rn + b.d) / 2 : Math.max(b.rp, b.rn);
@@ -338,13 +321,15 @@
   }
 
   function rebuildBubbles(people) {
-    if (!W || !H) { bubbles = []; return; }
-    if (!people.length) { bubbles = []; draw(); return; }
+    if (!W || !H || !people.length) {
+      bubbles = [];
+      draw();
+      return;
+    }
 
     const prev = new Map(bubbles.map(b => [b.name, b]));
     const cx = W / 2, cy = H / 2;
     const base = Math.min(W, H);
-
     const maxV = Math.max(1, ...people.map(p => Math.max(p.neg, p.pos)));
 
     let rMax = Math.max(38, Math.min(86, base * 0.14));
@@ -354,8 +339,8 @@
     const rad = v => v > 0 ? rMin + (rMax - rMin) * Math.sqrt(v / maxV) : 0;
 
     const list = people.map(p => {
-      const rp = rad(p.pos);          // 加分圆半径
-      const rn = rad(p.neg);          // 扣分圆半径
+      const rp = rad(p.pos);
+      const rn = rad(p.neg);
       const both = rp > 0 && rn > 0;
       const d = both ? (rp + rn) * OVERLAP : 0;
       const old = prev.get(p.name);
@@ -423,7 +408,7 @@
           if (sx <= 0 || sy <= 0) continue;
 
           const nx = dx / sx, ny = dy / sy;
-          let q = Math.hypot(nx, ny);
+          const q = Math.hypot(nx, ny);
           if (q >= 1) continue;
           if (q < 1e-6) {
             const ang = Math.random() * Math.PI * 2;
@@ -796,15 +781,6 @@
     render();
   }
 
-  /* 读取同目录 CSV（带时间戳绕过缓存） */
-  async function fetchCSV() {
-    const url = CSV_URL + (CSV_URL.indexOf('?') >= 0 ? '&' : '?') + 'v=' + Date.now();
-    const res = await fetch(url, { cache: 'no-store' });
-    if (!res.ok) throw new Error('HTTP ' + res.status + ' ' + res.statusText);
-    const text = await res.text();
-    return rowsFromCSV(text);   // 可能为空数组（无有效数据行）
-  }
-
   async function init() {
     resizeCanvas();
     elSrcBadge.classList.remove('err');
@@ -814,7 +790,11 @@
     let ok = false;
     let errMsg = '';
     try {
-      rows = await fetchCSV();
+      const url = CSV_URL + (CSV_URL.indexOf('?') >= 0 ? '&' : '?') + 'v=' + Date.now();
+      const res = await fetch(url, { cache: 'no-store' });
+      if (!res.ok) throw new Error('HTTP ' + res.status + ' ' + res.statusText);
+      const text = await res.text();
+      rows = rowsFromCSV(text);
       ok = true;
     } catch (e) {
       errMsg = e && e.message ? e.message : String(e);
@@ -832,31 +812,14 @@
       elSrcBadge.classList.add('err');
       elSrcBadge.textContent = '未读取到 ' + CSV_URL;
       elSrcBadge.title = '读取失败：' + errMsg +
-        '\n请确认 ' + CSV_URL + ' 与本 HTML 位于同一目录，且通过 http(s) 访问（如 GitHub Pages）。';
+        '\n请确认 ' + CSV_URL + ' 与本页面位于同一仓库，且已推送到 GitHub Pages。';
     }
 
     ensureLoop();
   }
 
-  /* 重新读取按钮 */
   document.getElementById('reloadBtn').addEventListener('click', function () {
     init();
-  });
-
-  /* ============================================================
-   *  导出
-   * ============================================================ */
-  document.getElementById('exportBtn').addEventListener('click', function () {
-    const csv = toCSV(state.allRows);
-    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'data.csv';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
   });
 
   /* ============================================================
