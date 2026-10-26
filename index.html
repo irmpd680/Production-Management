@@ -670,6 +670,11 @@
     if (state.month !== null) {
       rows = rows.filter(r => statOf(r.date).m === state.month);
     }
+       // 日期倒序：最近的在上方；同一天保持 CSV 原有顺序
+    rows.sort(function (a, b) {
+      if (a.date === b.date) return 0;
+      return a.date < b.date ? 1 : -1;
+    });
     return rows;
   }
 
