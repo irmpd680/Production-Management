@@ -802,8 +802,8 @@
     elMonth.disabled = false;
 
     // 默认选中该统计年有数据的最新月份；若选中的月份在该年无数据也回到最新月份
-    if (state.month === null || months.indexOf(state.month) < 0) {
-      state.month = months.length ? months[0] : null;
+    if (state.month !== null && months.indexOf(state.month) < 0) {
+     state.month = null;
     }
 
     let html = '<option value="">全部月份</option>';
