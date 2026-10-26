@@ -663,18 +663,18 @@
   const elSrcBadge  = document.getElementById('srcBadge');
   const tbody       = document.querySelector('#detailTable tbody');
 
-  /** 根据年份和月份过滤数据 */
+    /** 根据年份和月份过滤数据（按日期降序） */
   function filterRows() {
     if (state.year === null) return [];
     let rows = state.allRows.filter(r => statOf(r.date).y === state.year);
     if (state.month !== null) {
       rows = rows.filter(r => statOf(r.date).m === state.month);
     }
-       // 日期倒序：最近的在上方；同一天保持 CSV 原有顺序
-    rows.sort(function (a, b) {
-      if (a.date === b.date) return 0;
-      return a.date < b.date ? 1 : -1;
-    });
+  /** 日期倒序，同一天的多条记录会保持 CSV 原始出现顺序 */
+  rows.sort(function (a, b) {
+  if (a.date !== b.date) return a.date < b.date ? 1 : -1;
+  return a.name.localeCompare(b.name, 'zh-CN');
+});
     return rows;
   }
 
